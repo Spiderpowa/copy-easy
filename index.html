@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fetch & Copy | Simple Viewer</title>
+  <!-- Bootstrap CSS -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+    crossorigin="anonymous"
+  />
+  <!-- Bootstrap Icons (optional, for the copy icon) -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"
+    rel="stylesheet"
+  />
+  <style>
+    body { padding: 2rem 0; }
+    textarea#content {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      white-space: pre;           /* preserve spacing */
+      overflow-wrap: normal;      /* no wrapping */
+      overflow-x: auto;           /* scroll horizontally if needed */
+      min-height: 50vh;
+    }
+    .spinner { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="mb-4">
+      <h1 class="h3">Fetch & Copy</h1>
+      <p class="text-muted mb-0">Provide <code>?url=...</code> in the address bar, or paste a URL below.</p>
+    </header>
+
+    <!-- URL input / controls -->
+    <div class="card mb-4">
+      <div class="card-body">
+        <form id="load-form" class="row gy-2 gx-2 align-items-center">
+          <div class="col-12 col-lg">
+            <label for="url" class="form-label mb-1">File URL</label>
+            <input type="url" class="form-control" id="url" placeholder="https://example.com/file.txt" required />
+          </div>
+          <div class="col-auto">
+            <label class="form-label d-block mb-1 invisible">.</label>
+            <button id="load-btn" type="submit" class="btn btn-primary">
+              Load
+            </button>
+          </div>
+          <div class="col-auto">
+            <label class="form-label d-block mb-1 invisible">.</label>
+            <button id="copy-btn" type="button" class="btn btn-outline-secondary" disabled>
+              <i class="bi bi-clipboard"></i> Copy
+            </button>
+          </div>
+        </form>
+
+        <div id="status" class="mt-3">
+          <div class="spinner d-inline-flex align-items-center" id="spinner">
+            <div class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></div>
+            <span>Fetching…</span>
+          </div>
+          <div id="meta" class="text-muted small"></div>
+          <div id="alert" class="mt-2"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Content viewer -->
+    <div class="mb-3 d-flex justify-content-between align-items-center">
+      <h2 class="h5 mb-0">Content</h2>
+      <a id="open-raw" href="#" target="_blank" rel="noopener" class="small d-none">Open raw URL ↗</a>
+    </div>
+    <textarea id="content" class="form-control" readonly placeholder="Content will appear here…"></textarea>
+  </div>
+
+  <!-- Bootstrap JS (optional for better UX) -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+  <script>
+    const qs = new URLSearchParams(location.search);
+    const urlInput = document.getElementById('url');
+    const loadForm = document.getElementById('load-form');
+    const loadBtn = document.getElementById('load-btn');
+    const copyBtn = document.getElementById('copy-btn');
+    const contentEl = document.getElementById('content');
+    const spinner = document.getElementById('spinner');
+    const alertBox = document.getElementById('alert');
+    const metaEl = document.getElementById('meta');
+    const openRawLink = document.getElementById('open-raw');
+
+    function showSpinner(show) { spinner.style.display = show ? 'inline-flex' : 'none'; }
+    function setAlert(message, type = 'danger') {
+      alertBox.innerHTML = message ? `<div class="alert alert-${type} py-2 mb-0">${message}</div>` : '';
+    }
+    function formatBytes(bytes) {
+      if (bytes === 0 || bytes == null) return '';
+      const k = 1024, sizes = ['B','KB','MB','GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+    }
+
+    async function fetchAndDisplay(targetUrl) {
+      if (!targetUrl) return;
+      setAlert('');
+      contentEl.value = '';
+      copyBtn.disabled = true;
+      showSpinner(true);
+      loadBtn.disabled = true;
+
+      try {
+        const res = await fetch(targetUrl, {
+          // Default CORS mode; target server must allow it.
+          // mode: 'cors'
+          headers: { 'Accept': 'text/*, application/json, */*' }
+        });
+
+        const contentType = res.headers.get('content-type') || '';
+        const len = parseInt(res.headers.get('content-length') || '0', 10);
+
+        metaEl.textContent = [
+          contentType ? `Content-Type: ${contentType}` : '',
+          len ? `Size: ${formatBytes(len)}` : ''
+        ].filter(Boolean).join(' · ');
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        }
+
+        // Heuristic: treat as text if content-type includes "text", "json", "xml", or empty.
+        const isTextish = /text|json|xml|csv|yaml|markdown|html/i.test(contentType) || contentType === '';
+        if (!isTextish) {
+          setAlert(`Warning: This looks like a non-text file (${contentType}). Displaying as text may be garbled.`, 'warning');
+        }
+
+        const text = await res.text();
+        contentEl.value = text;
+        copyBtn.disabled = text.length === 0;
+
+        openRawLink.classList.remove('d-none');
+        openRawLink.href = targetUrl;
+
+      } catch (err) {
+        console.error(err);
+        setAlert(
+          `Failed to fetch. ${err.message}.<br/>
+           <span class="small text-muted">If this is a CORS issue, the file host must allow cross-origin requests.</span>`,
+          'danger'
+        );
+      } finally {
+        showSpinner(false);
+        loadBtn.disabled = false;
+      }
+    }
+
+    // Load button / form submit
+    loadForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const u = urlInput.value.trim();
+      if (!u) return;
+      // Update the address bar (so sharing the page preserves the URL)
+      const newQs = new URLSearchParams(location.search);
+      newQs.set('url', u);
+      const newUrl = `${location.pathname}?${newQs.toString()}${location.hash}`;
+      history.replaceState(null, '', newUrl);
+      fetchAndDisplay(u);
+    });
+
+    // Copy button
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(contentEl.value);
+        setAlert('Copied to clipboard!', 'success');
+        setTimeout(() => setAlert(''), 1500);
+      } catch (err) {
+        setAlert('Copy failed. Your browser may not allow clipboard access.', 'danger');
+      }
+    });
+
+    // If ?url= is present, auto-load
+    const initialUrl = qs.get('url');
+    if (initialUrl) {
+      urlInput.value = initialUrl;
+      fetchAndDisplay(initialUrl);
+    }
+  </script>
+</body>
+</html>
